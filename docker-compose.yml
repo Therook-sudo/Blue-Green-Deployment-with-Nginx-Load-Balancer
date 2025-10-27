@@ -15,8 +15,7 @@ services:
       - app_network
 
   app_blue:
-    build:
-      context: ./mock-service
+    image: ${BLUE_IMAGE:-yimikaade/wonderful:latest}
     environment:
       - APP_POOL=blue
       - RELEASE_ID=${RELEASE_ID_BLUE:-blue-v1.0.0}
@@ -28,8 +27,7 @@ services:
     restart: unless-stopped
 
   app_green:
-    build:
-      context: ./mock-service
+    image: ${GREEN_IMAGE:-yimikaade/wonderful:latest}
     environment:
       - APP_POOL=green
       - RELEASE_ID=${RELEASE_ID_GREEN:-green-v1.0.0}
