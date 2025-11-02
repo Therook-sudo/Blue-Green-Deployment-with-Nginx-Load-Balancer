@@ -1,9 +1,9 @@
 # Environment variables
 .env
 .env.example
-
 # Generated nginx config
 nginx.conf
+
 
 # Docker volumes
 volumes/

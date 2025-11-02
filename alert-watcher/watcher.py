@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""
-Blue/Green Deployment Alert Watcher
-Monitors Nginx logs and sends Slack alerts on failovers and high error rates.
-"""
-
-import io
 import json
 import os
 import time
@@ -13,41 +7,35 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-# Configuration from environment variables
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
-ERROR_RATE_THRESHOLD = float(os.environ.get('ERROR_RATE_THRESHOLD', '2.0'))  # percentage
-WINDOW_SIZE = int(os.environ.get('WINDOW_SIZE', '200'))  # requests
-ALERT_COOLDOWN_SEC = int(os.environ.get('ALERT_COOLDOWN_SEC', '300'))  # 5 minutes
+ERROR_RATE_THRESHOLD = float(os.environ.get('ERROR_RATE_THRESHOLD', '2.0'))
+WINDOW_SIZE = int(os.environ.get('WINDOW_SIZE', '200'))
+ALERT_COOLDOWN_SEC = int(os.environ.get('ALERT_COOLDOWN_SEC', '300'))
 MAINTENANCE_MODE = os.environ.get('MAINTENANCE_MODE', 'false').lower() == 'true'
 
 LOG_FILE = '/var/log/nginx/access.log'
 
-# State tracking
 last_pool = None
 request_window = deque(maxlen=WINDOW_SIZE)
 last_failover_alert = 0
 last_error_rate_alert = 0
 
-
 def send_slack_alert(message, alert_type="info"):
-    """Send alert to Slack webhook."""
     if not SLACK_WEBHOOK_URL:
-        print(f"⚠️  No Slack webhook configured. Alert: {message}")
+        print(f"⚠️  No Slack webhook. Alert: {message}")
         return
     
     if MAINTENANCE_MODE and alert_type == "failover":
         print(f"🔧 Maintenance mode: Suppressing failover alert")
         return
     
-    # Color coding
     colors = {
-        "failover": "#FF9800",  # Orange
-        "error": "#F44336",     # Red
-        "recovery": "#4CAF50",  # Green
-        "info": "#2196F3"       # Blue
+        "failover": "#FF9800",
+        "error": "#F44336",
+        "recovery": "#4CAF50",
+        "info": "#2196F3"
     }
     
-    # Icons
     icons = {
         "failover": "🔄",
         "error": "🚨",
@@ -68,15 +56,13 @@ def send_slack_alert(message, alert_type="info"):
     try:
         response = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=5)
         if response.status_code == 200:
-            print(f"✅ Slack alert sent: {message}")
+            print(f"✅ Slack alert sent: {message[:50]}...")
         else:
             print(f"❌ Slack alert failed: {response.status_code}")
     except Exception as e:
         print(f"❌ Error sending Slack alert: {e}")
 
-
 def check_cooldown(alert_type):
-    """Check if enough time has passed since last alert of this type."""
     global last_failover_alert, last_error_rate_alert
     
     now = time.time()
@@ -95,36 +81,27 @@ def check_cooldown(alert_type):
     
     return True
 
-
 def calculate_error_rate():
-    """Calculate error rate from request window."""
     if len(request_window) == 0:
         return 0.0
     
     error_count = sum(1 for status in request_window if status >= 500)
     return (error_count / len(request_window)) * 100
 
-
 def process_log_line(line):
-    """Process a single Nginx log line."""
     global last_pool
     
     try:
-        # Parse JSON log line
         log = json.loads(line.strip())
         
-        # Extract relevant fields
         pool = log.get('pool', 'unknown')
         release = log.get('release', 'unknown')
         status = int(log.get('status', 0))
         upstream_status = log.get('upstream_status', '')
         upstream_addr = log.get('upstream_addr', '')
-        request_time = log.get('request_time', '0')
         
-        # Track request status in sliding window
         request_window.append(status)
         
-        # Detect pool changes (failover)
         if last_pool is not None and pool != last_pool and pool != 'unknown':
             if check_cooldown("failover"):
                 message = (
@@ -137,11 +114,9 @@ def process_log_line(line):
                 )
                 send_slack_alert(message, "failover")
         
-        # Update last seen pool
         if pool != 'unknown':
             last_pool = pool
         
-        # Check error rate (only if window is full)
         if len(request_window) >= WINDOW_SIZE:
             error_rate = calculate_error_rate()
             
@@ -156,20 +131,16 @@ def process_log_line(line):
                     )
                     send_slack_alert(message, "error")
         
-        # Log processing
         print(f"[{datetime.now().strftime('%H:%M:%S')}] "
               f"Pool: {pool:6s} | Status: {status} | "
               f"Error Rate: {calculate_error_rate():5.2f}%")
         
     except json.JSONDecodeError:
-        # Skip non-JSON lines (e.g., startup messages)
         pass
     except Exception as e:
         print(f"Error processing log line: {e}")
 
-
 def tail_log_file(filepath):
-    """Tail a log file continuously."""
     print(f"📊 Starting log watcher...")
     print(f"📁 Log file: {filepath}")
     print(f"🔗 Slack webhook: {'configured' if SLACK_WEBHOOK_URL else 'NOT CONFIGURED'}")
@@ -179,39 +150,33 @@ def tail_log_file(filepath):
     print(f"🔧 Maintenance mode: {MAINTENANCE_MODE}")
     print("")
     
-    # Wait for log file to exist
     while not Path(filepath).exists():
         print(f"⏳ Waiting for log file {filepath}...")
         time.sleep(2)
     
     print(f"✅ Log file found, starting to tail...\n")
     
-    # Open and tail the file
+    # Use a different approach - read from current position without seeking
     with open(filepath, 'r') as f:
-        # Try to seek to end, but handle non-seekable files
-        try:
-            f.seek(0, 2)
-        except (OSError, io.UnsupportedOperation):
-            # If file is not seekable (e.g., pipe/docker volume), just start from current position
-            print("⚠️  File is not seekable, reading from beginning...")
+        # Read existing lines to get to end
+        for line in f:
+            pass  # Skip existing lines
         
+        # Now tail new lines
         while True:
             line = f.readline()
             if line:
                 process_log_line(line)
             else:
-                time.sleep(0.1)  # Wait a bit before checking again
-
+                time.sleep(0.1)
 
 def main():
-    """Main entry point."""
     print("="*60)
     print("  Blue/Green Deployment Alert Watcher")
     print("="*60)
     
-    # Validate configuration
     if not SLACK_WEBHOOK_URL:
-        print("⚠️  WARNING: SLACK_WEBHOOK_URL not set. Alerts will be logged only.")
+        print("⚠️  WARNING: SLACK_WEBHOOK_URL not set.")
         print("")
     
     try:
@@ -220,8 +185,9 @@ def main():
         print("\n\n👋 Shutting down gracefully...")
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
         raise
-
 
 if __name__ == '__main__':
     main()
